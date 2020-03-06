@@ -1,0 +1,95 @@
+#!/usr/bin/env groovy
+
+final def pipelineSdkVersion = 'master'
+
+pipeline {
+    agent any
+    options {
+        timeout(time: 120, unit: 'MINUTES')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '10'))
+        skipDefaultCheckout()
+    }
+    stages {
+        stage('Init') {
+            steps {
+                milestone 10
+                library "s4sdk-pipeline-library@${pipelineSdkVersion}"
+                stageInitS4sdkPipeline script: this
+                abortOldBuilds script: this
+            }
+        }
+
+        stage('Build and Test') {
+            steps {
+                milestone 20
+                stageBuild script: this
+            }
+        }
+
+        stage('Local Tests') {
+            parallel {
+                stage("Static Code Checks") {
+                    when { expression { commonPipelineEnvironment.configuration.runStage.STATIC_CODE_CHECKS } }
+                    steps { stageStaticCodeChecks script: this }
+                }
+                stage("Lint") {
+                    when { expression { commonPipelineEnvironment.configuration.runStage.LINT } }
+                    steps { stageLint script: this }
+                }
+                stage("Backend Integration Tests") {
+                    when { expression { commonPipelineEnvironment.configuration.runStage.BACKEND_INTEGRATION_TESTS } }
+                    steps { stageBackendIntegrationTests script: this }
+                }
+                stage("Frontend Integration Tests") {
+                    when { expression { commonPipelineEnvironment.configuration.runStage.FRONTEND_INTEGRATION_TESTS } }
+                    steps { stageFrontendIntegrationTests script: this }
+                }
+                stage("Frontend Unit Tests") {
+                    when { expression { commonPipelineEnvironment.configuration.runStage.FRONTEND_UNIT_TESTS } }
+                    steps { stageFrontendUnitTests script: this }
+                }
+                stage("NPM Dependency Audit") {
+                    when { expression { commonPipelineEnvironment.configuration.runStage.NPM_AUDIT } }
+                    steps { stageNpmAudit script: this }
+                }
+            }
+        }
+
+        stage('Quality Checks') {
+            when { expression { commonPipelineEnvironment.configuration.runStage.QUALITY_CHECKS } }
+            steps {
+                milestone 50
+                stageS4SdkQualityChecks script: this
+            }
+        }
+    }
+    post {
+        always {
+            script {
+                debugReportArchive script: this
+                if (commonPipelineEnvironment?.configuration?.runStage?.SEND_NOTIFICATION) {
+                    postActionSendNotification script: this
+                }
+                postActionCleanupStashesLocks script: this
+                sendAnalytics script: this
+
+                if (commonPipelineEnvironment?.configuration?.runStage?.POST_PIPELINE_HOOK) {
+                    stage('Post Pipeline Hook') {
+                        stagePostPipelineHook script: this
+                    }
+                }
+            }
+        }
+        success {
+            script {
+                if (commonPipelineEnvironment?.configuration?.runStage?.ARCHIVE_REPORT) {
+                    postActionArchiveReport script: this
+                }
+            }
+        }
+        failure {
+            deleteDir()
+        }
+    }
+}
