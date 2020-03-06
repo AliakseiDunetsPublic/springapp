@@ -43,6 +43,6 @@ stages:
       - org: 'P2000244066trial'
         space: 'dev'
         apiEndpoint: 'https://api.cf.eu10.hana.ondemand.com'
-        appName: 'sampleapp'
+        appName: 'springapp'
         manifest: 'manifest.yml'
         credentialsId: 'CF_TRIAL_PLATFORM'
